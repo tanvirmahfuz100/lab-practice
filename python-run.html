@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Online Interpreter | Lab Exam Master</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Inter:wght@400;600;800&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg-main: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #1e293b;
+            --border: #e2e8f0;
+            --error: #ef4444;
+            --radius-md: 10px;
+            --font-sans: 'Outfit', 'Inter', system-ui, sans-serif;
+            --font-mono: 'Fira Code', 'JetBrains Mono', monospace;
+        }
+
+        body {
+            margin: 0;
+            font-family: var(--font-sans);
+            background: var(--bg-main);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background: var(--card-bg);
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: #0f172a;
+        }
+
+        .back-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .main-content {
+            display: flex;
+            flex: 1;
+            padding: 1rem;
+            gap: 1rem;
+            flex-direction: column;
+        }
+
+        @media (min-width: 768px) {
+            .main-content {
+                flex-direction: row;
+                padding: 2rem;
+            }
+        }
+
+        .editor-pane,
+        .output-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        .pane-header {
+            padding: 0.75rem 1rem;
+            background: #f1f5f9;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        textarea.code-editor {
+            flex: 1;
+            width: 100%;
+            border: none;
+            resize: none;
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            outline: none;
+            box-sizing: border-box;
+            background: #fafafa;
+            color: #1e293b;
+        }
+
+        pre.output-area {
+            flex: 1;
+            margin: 0;
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        .error-text {
+            color: #fca5a5;
+        }
+
+        .run-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.5rem 1.25rem;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .run-btn:hover:not(:disabled) {
+            background: var(--primary-hover);
+        }
+
+        .run-btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Python Sandbox</h1>
+        <a href="index.html" class="back-link">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Back to Practice
+        </a>
+    </header>
+
+    <div class="main-content">
+        <div class="editor-pane">
+            <div class="pane-header">
+                <span>Code Editor</span>
+                <button id="run-btn" class="run-btn" disabled>Loading Engine...</button>
+            </div>
+            <textarea id="code-editor" class="code-editor" spellcheck="false"
+                placeholder="# Write your Python code here...&#10;print('Hello, Web!')"></textarea>
+        </div>
+
+        <div class="output-pane">
+            <div class="pane-header">
+                <span>Terminal output</span>
+                <button id="clear-btn" class="run-btn"
+                    style="background:#ef4444; padding: 0.25rem 0.75rem;">Clear</button>
+            </div>
+            <pre id="output-area" class="output-area">Initializing Python engine, please wait...</pre>
+        </div>
+    </div>
+
+    <script>
+        let pyodideInstance = null;
+        const runBtn = document.getElementById('run-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const editor = document.getElementById('code-editor');
+        const outputArea = document.getElementById('output-area');
+
+        async function main() {
+            try {
+                pyodideInstance = await loadPyodide();
+                outputArea.innerHTML = "Python 3.11.3 (Pyodide) ready.\n>>> ";
+                runBtn.textContent = "Run Code";
+                runBtn.disabled = false;
+
+                // Setup standard output to capture prints
+                pyodideInstance.runPython(`
+import sys
+class CustomOutput:
+    def __init__(self):
+        self.output = ""
+    def write(self, string):
+        self.output += string
+    def flush(self):
+        pass
+        
+sys.stdout = CustomOutput()
+sys.stderr = CustomOutput()
+        `);
+            } catch (err) {
+                outputArea.innerHTML = "<span class='error-text'>Failed to load Python engine. Please check your internet connection.</span>";
+            }
+        }
+
+        main();
+
+        runBtn.addEventListener('click', async () => {
+            if (!pyodideInstance) return;
+
+            const code = editor.value;
+            runBtn.textContent = "Running...";
+            runBtn.disabled = true;
+            outputArea.innerHTML = "";
+
+            try {
+                // Reset stdout buffer
+                pyodideInstance.runPython(`
+sys.stdout.output = ""
+sys.stderr.output = ""
+        `);
+
+                await pyodideInstance.runPythonAsync(code);
+
+                // Get captured output
+                const output = pyodideInstance.runPython("sys.stdout.output");
+                outputArea.textContent = output + "\n>>> ";
+            } catch (err) {
+                // Get captured output before error
+                const prevOutput = pyodideInstance.runPython("sys.stdout.output");
+                outputArea.innerHTML = prevOutput + "<span class='error-text'>" + escapeHTML(err.toString()) + "</span>\n>>> ";
+            } finally {
+                runBtn.textContent = "Run Code";
+                runBtn.disabled = false;
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            outputArea.textContent = "";
+        });
+
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g,
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+
+        // Support Tab key in textarea
+        editor.addEventListener('keydown', function (e) {
+            if (e.key == 'Tab') {
+                e.preventDefault();
+                var start = this.selectionStart;
+                var end = this.selectionEnd;
+                // set textarea value to: text before caret + tab + text after caret
+                this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+                // put caret at right position again
+                this.selectionStart = this.selectionEnd = start + 4;
+            }
+        });
+    </script>
+</body>
+
+</html>
