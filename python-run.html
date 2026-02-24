@@ -110,6 +110,7 @@
             box-sizing: border-box;
             background: #fafafa;
             color: #1e293b;
+            tab-size: 4;
         }
 
         pre.output-area {
@@ -126,6 +127,16 @@
 
         .error-text {
             color: #fca5a5;
+        }
+
+        .error-line {
+            color: #fbbf24;
+            font-weight: bold;
+        }
+
+        .error-type {
+            color: #f87171;
+            font-weight: bold;
         }
 
         .run-btn {
@@ -147,14 +158,28 @@
             background: #94a3b8;
             cursor: not-allowed;
         }
+
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            background: #dcfce7;
+            color: #166534;
+            font-weight: 600;
+        }
+
+        .status-badge.loading {
+            background: #fef3c7;
+            color: #92400e;
+        }
     </style>
 </head>
 
 <body>
     <header>
         <h1>Python Sandbox</h1>
+        <span id="engine-status" class="status-badge loading">Loading Engine...</span>
         <a href="./" class="back-link">
-
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -175,11 +200,11 @@
 
         <div class="output-pane">
             <div class="pane-header">
-                <span>Terminal output</span>
+                <span>Terminal Output</span>
                 <button id="clear-btn" class="run-btn"
                     style="background:#ef4444; padding: 0.25rem 0.75rem;">Clear</button>
             </div>
-            <pre id="output-area" class="output-area">Initializing Python engine, please wait...</pre>
+            <pre id="output-area" class="output-area">Initializing Python engine + NumPy, please wait...</pre>
         </div>
     </div>
 
@@ -189,30 +214,55 @@
         const clearBtn = document.getElementById('clear-btn');
         const editor = document.getElementById('code-editor');
         const outputArea = document.getElementById('output-area');
+        const statusBadge = document.getElementById('engine-status');
 
         async function main() {
             try {
                 pyodideInstance = await loadPyodide();
-                outputArea.innerHTML = "Python 3.11.3 (Pyodide) ready.\n>>> ";
-                runBtn.textContent = "Run Code";
-                runBtn.disabled = false;
 
-                // Setup standard output to capture prints
+                // Pre-load NumPy
+                try {
+                    await pyodideInstance.loadPackage(['numpy']);
+                } catch (e) {
+                    console.warn("NumPy pre-load failed:", e);
+                }
+
+                // Setup: mock input() to use JavaScript prompt()
                 pyodideInstance.runPython(`
-import sys
-class CustomOutput:
+import sys, io
+
+class CaptureOutput:
     def __init__(self):
         self.output = ""
     def write(self, string):
         self.output += string
     def flush(self):
         pass
-        
-sys.stdout = CustomOutput()
-sys.stderr = CustomOutput()
-        `);
+
+sys.stdout = CaptureOutput()
+sys.stderr = CaptureOutput()
+
+# Mock input() to use JavaScript prompt dialog
+import builtins as _builtins
+def _browser_input(prompt_text=""):
+    from js import prompt
+    result = prompt(prompt_text)
+    if result is None:
+        result = ""
+    # Also print the prompt + input to stdout so user sees it
+    sys.stdout.write(str(prompt_text) + str(result) + "\\n")
+    return result
+_builtins.input = _browser_input
+                `);
+
+                outputArea.innerHTML = "Python 3.11.3 (Pyodide) ready. NumPy loaded.\n<span style='color:#10b981'>✓ input() works via browser prompt dialogs</span>\n>>> ";
+                runBtn.textContent = "▶ Run Code";
+                runBtn.disabled = false;
+                statusBadge.textContent = "Ready";
+                statusBadge.classList.remove("loading");
             } catch (err) {
                 outputArea.innerHTML = "<span class='error-text'>Failed to load Python engine. Please check your internet connection.</span>";
+                statusBadge.textContent = "Error";
             }
         }
 
@@ -227,11 +277,24 @@ sys.stderr = CustomOutput()
             outputArea.innerHTML = "";
 
             try {
-                // Reset stdout buffer
+                // Reset stdout/stderr buffer
                 pyodideInstance.runPython(`
 sys.stdout.output = ""
 sys.stderr.output = ""
-        `);
+                `);
+
+                // Re-inject input mock (in case user overwrote it)
+                pyodideInstance.runPython(`
+import builtins as _builtins
+def _browser_input(prompt_text=""):
+    from js import prompt
+    result = prompt(prompt_text)
+    if result is None:
+        result = ""
+    sys.stdout.write(str(prompt_text) + str(result) + "\\n")
+    return result
+_builtins.input = _browser_input
+                `);
 
                 await pyodideInstance.runPythonAsync(code);
 
@@ -239,18 +302,63 @@ sys.stderr.output = ""
                 const output = pyodideInstance.runPython("sys.stdout.output");
                 outputArea.textContent = output + "\n>>> ";
             } catch (err) {
-                // Get captured output before error
+                // Get any output before the error
                 const prevOutput = pyodideInstance.runPython("sys.stdout.output");
-                outputArea.innerHTML = prevOutput + "<span class='error-text'>" + escapeHTML(err.toString()) + "</span>\n>>> ";
+
+                // Parse the Python error for better display
+                const formattedError = formatPythonError(err.toString());
+                outputArea.innerHTML = escapeHTML(prevOutput) + formattedError + "\n>>> ";
             } finally {
-                runBtn.textContent = "Run Code";
+                runBtn.textContent = "▶ Run Code";
                 runBtn.disabled = false;
             }
         });
 
         clearBtn.addEventListener('click', () => {
-            outputArea.textContent = "";
+            outputArea.textContent = ">>> ";
         });
+
+        function formatPythonError(errorStr) {
+            // Parse Python traceback to highlight error type, line numbers
+            const lines = errorStr.split('\n');
+            let formatted = '';
+
+            for (const line of lines) {
+                const escaped = escapeHTML(line);
+
+                // Highlight line references: "File ..., line X"
+                if (/File\s+.*,\s+line\s+\d+/.test(line)) {
+                    const highlighted = escaped.replace(
+                        /(line\s+)(\d+)/g,
+                        '$1<span class="error-line">$2</span>'
+                    );
+                    formatted += '<span class="error-text">  ' + highlighted + '</span>\n';
+                }
+                // Highlight the error type line: "SomeError: message"
+                else if (/^\w*(Error|Exception)\s*:/.test(line.trim())) {
+                    const parts = line.trim().match(/^(\w+(?:Error|Exception))\s*:\s*(.*)/);
+                    if (parts) {
+                        formatted += '<span class="error-type">' + escapeHTML(parts[1]) + '</span><span class="error-text">: ' + escapeHTML(parts[2]) + '</span>\n';
+                    } else {
+                        formatted += '<span class="error-type">' + escaped + '</span>\n';
+                    }
+                }
+                // Highlight "SyntaxError" or standalone error names
+                else if (/^\w*(Error|Exception)$/.test(line.trim())) {
+                    formatted += '<span class="error-type">' + escaped + '</span>\n';
+                }
+                // Caret line (^) pointing to the error
+                else if (/^\s*\^+/.test(line)) {
+                    formatted += '<span class="error-line">' + escaped + '</span>\n';
+                }
+                // Regular traceback lines
+                else {
+                    formatted += '<span class="error-text">' + escaped + '</span>\n';
+                }
+            }
+
+            return formatted;
+        }
 
         function escapeHTML(str) {
             return str.replace(/[&<>'"]/g,
@@ -270,9 +378,7 @@ sys.stderr.output = ""
                 e.preventDefault();
                 var start = this.selectionStart;
                 var end = this.selectionEnd;
-                // set textarea value to: text before caret + tab + text after caret
                 this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
-                // put caret at right position again
                 this.selectionStart = this.selectionEnd = start + 4;
             }
         });
