@@ -255,8 +255,8 @@ def _browser_input(prompt_text=""):
 _builtins.input = _browser_input
                 `);
 
-                outputArea.innerHTML = "Python 3.11.3 (Pyodide) ready. NumPy loaded.\n<span style='color:#10b981'>✓ input() works via browser prompt dialogs</span>\n>>> ";
-                runBtn.textContent = "▶ Run Code";
+                outputArea.innerHTML = "Python 3.11.3 (Pyodide) ready. NumPy loaded.\n<span style='color:#10b981'>input() works via browser prompt dialogs</span>\n>>> ";
+                runBtn.textContent = "Run Code";
                 runBtn.disabled = false;
                 statusBadge.textContent = "Ready";
                 statusBadge.classList.remove("loading");
@@ -309,7 +309,7 @@ _builtins.input = _browser_input
                 const formattedError = formatPythonError(err.toString());
                 outputArea.innerHTML = escapeHTML(prevOutput) + formattedError + "\n>>> ";
             } finally {
-                runBtn.textContent = "▶ Run Code";
+                runBtn.textContent = "Run Code";
                 runBtn.disabled = false;
             }
         });
